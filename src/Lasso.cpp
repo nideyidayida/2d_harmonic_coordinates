@@ -1,0 +1,213 @@
+//
+//  Lasso.cpp
+//  ex5
+//
+//  Created by Olga Diamanti on 21/04/15.
+//
+//
+
+#include "Lasso.h"
+#include <igl/embree/unproject_in_mesh.h>
+#include <igl/viewer/ViewerCore.h>
+
+#include <iostream>
+#include <fstream>
+
+
+#include <igl/project.h>
+#include <igl/unproject.h>
+#include <igl/point_in_poly.h>
+#include <igl/facet_components.h>
+#include <igl/barycenter.h>
+
+using namespace igl;
+using namespace std;
+
+Lasso::Lasso(const Eigen::MatrixXd &V_,
+             const Eigen::MatrixXi &F_,
+             const igl::ViewerCore &v):
+V(V_),
+F(F_),
+viewercore(v)
+{
+  ei.init(V.cast<float>(),F);
+}
+
+Lasso::~Lasso()
+{
+}
+
+void Lasso::reinit()
+{
+//  ei.deinit();
+  ei.init(V.cast<float>(),F);
+}
+
+int Lasso::pickVertex(int mouse_x, int mouse_y)
+{
+  // Cast a ray in the view direction starting from the mouse position
+  double x = mouse_x;
+  double y = viewercore.viewport(3) - mouse_y;
+  
+  Eigen::RowVector3d pt;
+  
+  Eigen::Matrix4f modelview = viewercore.view * viewercore.model;
+  int vi = -1;
+  
+  std::vector<igl::Hit> hits;
+  igl::unproject_in_mesh(Eigen::Vector2f(x,y),
+                         modelview,
+                         viewercore.proj,
+                         viewercore.viewport,
+                         ei,pt,hits);
+
+  if (hits.size()> 0)
+  {
+    int fi = hits[0].id;
+    Eigen::RowVector3d bc;
+    bc << 1.0-hits[0].u-hits[0].v, hits[0].u, hits[0].v;
+    bc.maxCoeff(&vi);
+    vi = F(fi,vi);
+  }
+  return vi;
+}
+int Lasso::strokeAdd(int mouse_x,
+                    int mouse_y)
+{
+  // Cast a ray in the view direction starting from the mouse position
+  double x = mouse_x;
+  double y = viewercore.viewport(3) - mouse_y;
+  
+  std::vector<unsigned> pt2D; pt2D.push_back(x); pt2D.push_back(y);
+  stroke2DPoints.push_back(pt2D);
+  
+  Eigen::RowVector3d pt;
+  int fi = -1;
+  
+  Eigen::Matrix4f modelview = viewercore.view * viewercore.model;
+
+  if (d<0)//first time
+  {
+    std::vector<igl::Hit> hits;
+    igl::unproject_in_mesh(Eigen::Vector2f(x,y),
+                           modelview,
+                           viewercore.proj,
+                           viewercore.viewport,
+                           ei,pt,hits);
+    if (hits.size()> 0)
+    {
+      fi = hits[0].id;
+      Eigen::Vector3f proj = igl::project(pt.transpose().cast<float>().eval(), modelview, viewercore.proj,viewercore.viewport);
+      d = proj[2];
+    }
+  }
+  
+  // This is lazy, it will find more than just the first hit
+  Eigen::Vector3f pt2 = igl::unproject(Eigen::Vector3f(x,y,0.95*d), modelview, viewercore.proj, viewercore.viewport);
+  pt = pt2.transpose().cast<double>();
+  
+  
+  strokePoints.push_back(pt);
+  return fi;
+  
+}
+
+void Lasso::strokeFinish(Eigen::VectorXi &selected_vertices)
+{
+  
+  Eigen::Matrix4f modelview = viewercore.view * viewercore.model;
+
+  //marker for selected vertices
+  Eigen::VectorXi is_selected; is_selected.setZero(V.rows(),1);
+  
+  //project all vertices, check which ones land inside the polyline
+  for (int vi =0; vi<V.rows(); ++vi)
+  {
+    Eigen::Vector3f vertex = V.row(vi).transpose().cast<float>();
+    Eigen::Vector3f proj = igl::project(vertex, modelview, viewercore.proj,viewercore.viewport);
+    if (igl::point_in_poly(stroke2DPoints, proj[0], proj[1]))
+      is_selected[vi] = 1;
+
+  }
+  
+  //the selection might consist of front facing and back facing facets.
+  //we will only select the connected component that is the most frontal
+  
+  //first, isolate the faces that have at least one selected vertex
+  int nf = 0;
+  Eigen::MatrixXi Fsel(F.rows(),3);
+  for (int fi = 0; fi<F.rows(); ++fi)
+  {
+    bool mark = false;
+    for (int i = 0; i<3; ++i)
+      if (is_selected[F(fi,i)])
+      {
+        mark = true;
+        break;
+      }
+    if (mark)
+      Fsel.row(nf++) = F.row(fi);
+  }
+  Fsel.conservativeResize(nf, Eigen::NoChange);
+  //compute their barycenters
+  Eigen::MatrixXd MFsel;
+  igl::barycenter(V, Fsel, MFsel);
+
+  //now, find all connected components of selected faces
+  Eigen::VectorXi cid;
+  igl::facet_components(Fsel, cid);
+  
+  //compute centroids of connected components
+  int ncomp = cid.maxCoeff()+1;
+  Eigen::MatrixXd region_centroids;
+  region_centroids.setZero(ncomp,3);
+  Eigen::VectorXi total; total.setZero(ncomp,1);
+  for (long fi = 0; fi<Fsel.rows(); ++fi)
+  {
+    int r = cid[fi];
+    region_centroids.row(r) += MFsel.row(fi);
+    total[r]++;
+  }
+  for (long i = 0; i<ncomp; ++i)
+    region_centroids.row(i) = region_centroids.row(i).array()/total[i];
+
+  //project all centroids and isolate only the most frontal one
+  float mind = 1e10;
+  int r = -1;
+  for (long i = 0; i<ncomp; ++i)
+  {
+    Eigen::Vector3f t = region_centroids.row(i).transpose().cast<float>();
+    Eigen::Vector3f proj = igl::project(t,
+                                        modelview,
+                                        viewercore.proj,
+                                        viewercore.viewport);
+    float depth = proj[2];
+    if (mind > depth)
+    {
+      r = i;
+      mind = depth;
+    }
+  }
+  
+  //all vertices belonging to other components are unmarked
+  for (long fi = 0; fi<Fsel.rows(); ++fi)
+  {
+    if (cid[fi] != r)
+    for (int i = 0; i<3; ++i)
+      is_selected[Fsel(fi,i)] = 0;
+  }
+
+  //return the selected vertices
+  int nc = is_selected.sum();
+  selected_vertices.resize(nc,1);
+  int num = 0;
+  for (int vi =0; vi<V.rows(); ++vi)
+    if (is_selected[vi])
+      selected_vertices[num++] = vi;
+  
+  
+
+  strokePoints.clear();
+  stroke2DPoints.clear();
+  d = -1;
+}
