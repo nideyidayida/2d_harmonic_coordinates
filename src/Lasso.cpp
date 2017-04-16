@@ -1,7 +1,6 @@
 #include "Lasso.h"
 #include <igl/embree/unproject_onto_mesh.h>
 #include <igl/embree/unproject_in_mesh.h>
-#include <igl/viewer/ViewerCore.h>
 
 #include <iostream>
 #include <fstream>
@@ -32,7 +31,6 @@ Lasso::~Lasso()
 
 void Lasso::reinit()
 {
-//  ei.deinit();
   ei.init(V.cast<float>(),F);
 }
 
@@ -72,29 +70,27 @@ int Lasso::strokeAdd(int mouse_x,
 
   if (d<0)//first time
   {
-    std::vector<igl::Hit> hits;
-    igl::embree::unproject_in_mesh(Eigen::Vector2f(x,y),
+    Eigen::Vector3f bc;
+    if (igl::unproject_onto_mesh(Eigen::Vector2f(x,y),
                            modelview,
                            viewer.core.proj,
                            viewer.core.viewport,
-                           ei,
-                           pt,
-                           hits);
-    //igl::embree::unproject_in_mesh(Vector2f(x,y),model,proj,viewport,ei,obj,hits);
-    if (hits.size()> 0)
+                           V,
+                           F,
+                           fi,
+                           bc))
     {
-      fi = hits[0].id;
       Eigen::Vector3f proj = igl::project(pt.transpose().cast<float>().eval(), modelview, viewer.core.proj,viewer.core.viewport);
       d = proj[2];
     }
+
   }
-  
+
   // This is lazy, it will find more than just the first hit
-  Eigen::Vector3f pt2 = igl::unproject(Eigen::Vector3f(x,y,0.95*d), modelview, viewer.core.proj, viewer.core.viewport);
-  pt = pt2.transpose().cast<double>();
-  
-  
+  pt = igl::unproject(Eigen::Vector3f(x,y,0.95*d), modelview, viewer.core.proj, viewer.core.viewport).transpose().cast<double>();
+
   strokePoints.push_back(pt);
+
   return fi;
   
 }
