@@ -16,16 +16,14 @@ Eigen::MatrixXd V(0,3);
 //face array, #F x3
 Eigen::MatrixXi F(0,3);
 
-
 //mouse interaction
 enum MouseMode { SELECT, TRANSLATE, ROTATE, NONE };
 MouseMode mouse_mode = NONE;
 bool doit = false;
 int down_mouse_x = -1, down_mouse_y = -1;
 
-
 //for selecting vertices
-Lasso *lasso;
+std::unique_ptr<Lasso> lasso;
 //list of currently selected vertices
 Eigen::VectorXi selected_v(0,1);
 
@@ -63,8 +61,6 @@ bool callback_key_down(igl::viewer::Viewer& viewer, unsigned char key, int modif
 void onNewHandleID();
 void applySelection();
 
-
-
 bool solve(igl::viewer::Viewer& viewer)
 {
   /**** Add your code for computing the deformation from handle_vertex_positions and handle_vertices here (replace following line) ****/
@@ -75,7 +71,6 @@ bool solve(igl::viewer::Viewer& viewer)
 
   return true;
 };
-
 
 void get_new_handle_locations()
 {
@@ -104,7 +99,7 @@ int main(int argc, char *argv[])
 {
   if (argc != 2)
   {
-    cout << "Usage ex1_bin mesh.off" << endl;
+    cout << "Usage assignment5_bin mesh.off" << endl;
     exit(0);
   }
 
@@ -121,7 +116,7 @@ int main(int argc, char *argv[])
   viewer.callback_init = [&](igl::viewer::Viewer& viewer)
   {
 
-      viewer.ngui->addGroup("Param Demo");
+      viewer.ngui->addGroup("Deformation Controls");
 
       viewer.ngui->addVariable<MouseMode >("MouseMode",mouse_mode)->setItems({"SELECT", "TRANSLATE", "ROTATE", "NONE"});
 
@@ -141,11 +136,11 @@ int main(int argc, char *argv[])
   viewer.data.clear();
   viewer.data.set_mesh(V, F);
 
-
   // Initialize selector
-  lasso = new Lasso(V, F, viewer);
+  lasso = std::unique_ptr<Lasso>(new Lasso(V, F, viewer));
 
   viewer.core.point_size = 10;
+  viewer.core.set_rotation_type(igl::viewer::ViewerCore::ROTATION_TYPE_TRACKBALL);
 
   viewer.launch();
 }
@@ -164,7 +159,7 @@ bool callback_mouse_down(igl::viewer::Viewer& viewer, int button, int modifier)
     if (lasso->strokeAdd(viewer.current_mouse_x, viewer.current_mouse_y) >=0)
       doit = true;
   }
-  else if (mouse_mode == TRANSLATE || mouse_mode == ROTATE)
+  else if ((mouse_mode == TRANSLATE) || (mouse_mode == ROTATE))
   {
     int vi = lasso->pickVertex(viewer.current_mouse_x, viewer.current_mouse_y);
     if(vi>=0 && handle_id[vi]>=0)  //if a region was found, mark it for translation/rotation
@@ -186,9 +181,9 @@ bool callback_mouse_move(igl::viewer::Viewer& viewer, int mouse_x, int mouse_y)
     lasso->strokeAdd(mouse_x, mouse_y);
     return true;
   }
-  if (mouse_mode == TRANSLATE ||mouse_mode == ROTATE)
+  if ((mouse_mode == TRANSLATE) || (mouse_mode == ROTATE))
   {
-    if( mouse_mode == TRANSLATE)
+    if (mouse_mode == TRANSLATE)
       translation = computeTranslation(viewer,
                                        mouse_x,
                                        down_mouse_x,
@@ -226,7 +221,7 @@ bool callback_mouse_up(igl::viewer::Viewer& viewer, int button, int modifier)
     return true;
   }
 
-  if (mouse_mode == TRANSLATE || mouse_mode == ROTATE)
+  if ((mouse_mode == TRANSLATE) || (mouse_mode == ROTATE))
   {
 #ifdef UPDATE_ONLY_ON_UP
     if(moving_handle>=0)
@@ -326,36 +321,39 @@ bool callback_pre_draw(igl::viewer::Viewer& viewer)
 
 bool callback_key_down(igl::viewer::Viewer& viewer, unsigned char key, int modifiers)
 {
+  bool handled = false;
   if (key == 'S')
   {
     mouse_mode = SELECT;
-    return true;
+    handled = true;
   }
 
-  if (key == 'T' && modifiers == IGL_MOD_ALT)
+  if ((key == 'T') && (modifiers == IGL_MOD_ALT))
   {
     mouse_mode = TRANSLATE;
-    return true;
+    handled = true;
   }
 
-  if (key == 'R' && modifiers == IGL_MOD_ALT)
+  if ((key == 'R') && (modifiers == IGL_MOD_ALT))
   {
     mouse_mode = ROTATE;
-    return true;
+    handled = true;
   }
   if (key == 'A')
   {
     applySelection();
     callback_key_down(viewer, '1', 0);
-    return true;
+    handled = true;
   }
-  return false;
+
+  viewer.ngui->refresh();
+  return handled;
 }
 
 void onNewHandleID()
 {
   //store handle vertices too
-  int numFree = (handle_id.array()==-1).cast<int>().sum();
+  int numFree = (handle_id.array() == -1).cast<int>().sum();
   int num_handle_vertices = V.rows() - numFree;
   handle_vertices.setZero(num_handle_vertices);
   handle_vertex_positions.setZero(num_handle_vertices,3);
@@ -496,5 +494,4 @@ Eigen::Vector4f computeRotation(igl::viewer::Viewer& viewer,
   igl::quat_mult(rotation.data(), drot.data(), out.data());
   igl::quat_mult(drot_conj.data(), out.data(), rotation.data());
   return rotation;
-
 }
