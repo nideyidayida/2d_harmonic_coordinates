@@ -1,7 +1,6 @@
 #ifndef __ex5__Lasso__
 #define __ex5__Lasso__
 
-#include <igl/embree/EmbreeIntersector.h>
 #include <igl/viewer/Viewer.h>
 
 class Lasso
@@ -13,11 +12,10 @@ public:
          const Eigen::MatrixXi &F_,
          const igl::viewer::Viewer &v);
   ~Lasso();
-  void reinit();
+
 private:
   const Eigen::MatrixXd &V;
   const Eigen::MatrixXi &F;
-  igl::embree::EmbreeIntersector ei;
   const igl::viewer::Viewer &viewer;
   
   std::vector<std::vector<unsigned int> > stroke2DPoints;
@@ -30,4 +28,4 @@ public:
   std::vector< Eigen::Matrix<double, 1,3>  > strokePoints;
 };
 
-#endif /* defined(__ex5__Lasso__) */
+#endif

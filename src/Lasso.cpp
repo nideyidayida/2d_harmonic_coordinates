@@ -1,16 +1,15 @@
 #include "Lasso.h"
-#include <igl/embree/unproject_onto_mesh.h>
-#include <igl/embree/unproject_in_mesh.h>
 
 #include <iostream>
 #include <fstream>
-
 
 #include <igl/project.h>
 #include <igl/unproject.h>
 #include <igl/point_in_poly.h>
 #include <igl/facet_components.h>
 #include <igl/barycenter.h>
+
+#include <igl/unproject_onto_mesh.h>
 
 using namespace igl;
 using namespace std;
@@ -22,16 +21,10 @@ V(V_),
 F(F_),
 viewer(v)
 {
-  ei.init(V.cast<float>(),F);
 }
 
 Lasso::~Lasso()
 {
-}
-
-void Lasso::reinit()
-{
-  ei.init(V.cast<float>(),F);
 }
 
 int Lasso::pickVertex(int mouse_x, int mouse_y)

@@ -261,7 +261,6 @@ bool callback_mouse_up(igl::viewer::Viewer& viewer, int button, int modifier)
     rotation.setZero(); rotation[3] = 1.;
     moving_handle = -1;
     
-    lasso->reinit();
     compute_handle_centroids();
     
     return true;
