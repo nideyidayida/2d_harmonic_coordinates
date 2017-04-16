@@ -1,20 +1,8 @@
-//
-//  Lasso.h
-//  ex5
-//
-//  Created by Olga Diamanti on 21/04/15.
-//
-//
-
 #ifndef __ex5__Lasso__
 #define __ex5__Lasso__
 
 #include <igl/embree/EmbreeIntersector.h>
-
-//forward declaration of ViewerCore (needed for unprojection)
-namespace igl {
-  class ViewerCore;
-}
+#include <igl/viewer/Viewer.h>
 
 class Lasso
 {
@@ -23,14 +11,14 @@ public:
 public:
   Lasso(const Eigen::MatrixXd &V_,
          const Eigen::MatrixXi &F_,
-         const igl::ViewerCore &v);
+         const igl::viewer::Viewer &v);
   ~Lasso();
   void reinit();
 private:
   const Eigen::MatrixXd &V;
   const Eigen::MatrixXi &F;
-  igl::EmbreeIntersector ei;
-  const igl::ViewerCore &viewercore;
+  igl::embree::EmbreeIntersector ei;
+  const igl::viewer::Viewer &viewer;
   
   std::vector<std::vector<unsigned int> > stroke2DPoints;
   double d = -1;

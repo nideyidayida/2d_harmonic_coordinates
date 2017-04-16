@@ -1,12 +1,5 @@
-//
-//  Lasso.cpp
-//  ex5
-//
-//  Created by Olga Diamanti on 21/04/15.
-//
-//
-
 #include "Lasso.h"
+#include <igl/embree/unproject_onto_mesh.h>
 #include <igl/embree/unproject_in_mesh.h>
 #include <igl/viewer/ViewerCore.h>
 
@@ -25,10 +18,10 @@ using namespace std;
 
 Lasso::Lasso(const Eigen::MatrixXd &V_,
              const Eigen::MatrixXi &F_,
-             const igl::ViewerCore &v):
+             const igl::viewer::Viewer &v):
 V(V_),
 F(F_),
-viewercore(v)
+viewer(v)
 {
   ei.init(V.cast<float>(),F);
 }
@@ -45,38 +38,29 @@ void Lasso::reinit()
 
 int Lasso::pickVertex(int mouse_x, int mouse_y)
 {
-  // Cast a ray in the view direction starting from the mouse position
-  double x = mouse_x;
-  double y = viewercore.viewport(3) - mouse_y;
-  
-  Eigen::RowVector3d pt;
-  
-  Eigen::Matrix4f modelview = viewercore.view * viewercore.model;
   int vi = -1;
-  
-  std::vector<igl::Hit> hits;
-  igl::unproject_in_mesh(Eigen::Vector2f(x,y),
-                         modelview,
-                         viewercore.proj,
-                         viewercore.viewport,
-                         ei,pt,hits);
 
-  if (hits.size()> 0)
+  int fid;
+  Eigen::Vector3f bc;
+  // Cast a ray in the view direction starting from the mouse position
+  double x = viewer.current_mouse_x;
+  double y = viewer.core.viewport(3) - viewer.current_mouse_y;
+  if(igl::unproject_onto_mesh(Eigen::Vector2f(x,y), viewer.core.view * viewer.core.model,
+                              viewer.core.proj, viewer.core.viewport, V, F, fid, bc))
   {
-    int fi = hits[0].id;
-    Eigen::RowVector3d bc;
-    bc << 1.0-hits[0].u-hits[0].v, hits[0].u, hits[0].v;
+    // paint hit red
     bc.maxCoeff(&vi);
-    vi = F(fi,vi);
+    vi = F(fid,vi);
   }
   return vi;
+
 }
 int Lasso::strokeAdd(int mouse_x,
                     int mouse_y)
 {
   // Cast a ray in the view direction starting from the mouse position
   double x = mouse_x;
-  double y = viewercore.viewport(3) - mouse_y;
+  double y = viewer.core.viewport(3) - mouse_y;
   
   std::vector<unsigned> pt2D; pt2D.push_back(x); pt2D.push_back(y);
   stroke2DPoints.push_back(pt2D);
@@ -84,26 +68,29 @@ int Lasso::strokeAdd(int mouse_x,
   Eigen::RowVector3d pt;
   int fi = -1;
   
-  Eigen::Matrix4f modelview = viewercore.view * viewercore.model;
+  Eigen::Matrix4f modelview = viewer.core.view * viewer.core.model;
 
   if (d<0)//first time
   {
     std::vector<igl::Hit> hits;
-    igl::unproject_in_mesh(Eigen::Vector2f(x,y),
+    igl::embree::unproject_in_mesh(Eigen::Vector2f(x,y),
                            modelview,
-                           viewercore.proj,
-                           viewercore.viewport,
-                           ei,pt,hits);
+                           viewer.core.proj,
+                           viewer.core.viewport,
+                           ei,
+                           pt,
+                           hits);
+    //igl::embree::unproject_in_mesh(Vector2f(x,y),model,proj,viewport,ei,obj,hits);
     if (hits.size()> 0)
     {
       fi = hits[0].id;
-      Eigen::Vector3f proj = igl::project(pt.transpose().cast<float>().eval(), modelview, viewercore.proj,viewercore.viewport);
+      Eigen::Vector3f proj = igl::project(pt.transpose().cast<float>().eval(), modelview, viewer.core.proj,viewer.core.viewport);
       d = proj[2];
     }
   }
   
   // This is lazy, it will find more than just the first hit
-  Eigen::Vector3f pt2 = igl::unproject(Eigen::Vector3f(x,y,0.95*d), modelview, viewercore.proj, viewercore.viewport);
+  Eigen::Vector3f pt2 = igl::unproject(Eigen::Vector3f(x,y,0.95*d), modelview, viewer.core.proj, viewer.core.viewport);
   pt = pt2.transpose().cast<double>();
   
   
@@ -115,7 +102,7 @@ int Lasso::strokeAdd(int mouse_x,
 void Lasso::strokeFinish(Eigen::VectorXi &selected_vertices)
 {
   
-  Eigen::Matrix4f modelview = viewercore.view * viewercore.model;
+  Eigen::Matrix4f modelview = viewer.core.view * viewer.core.model;
 
   //marker for selected vertices
   Eigen::VectorXi is_selected; is_selected.setZero(V.rows(),1);
@@ -124,7 +111,7 @@ void Lasso::strokeFinish(Eigen::VectorXi &selected_vertices)
   for (int vi =0; vi<V.rows(); ++vi)
   {
     Eigen::Vector3f vertex = V.row(vi).transpose().cast<float>();
-    Eigen::Vector3f proj = igl::project(vertex, modelview, viewercore.proj,viewercore.viewport);
+    Eigen::Vector3f proj = igl::project(vertex, modelview, viewer.core.proj,viewer.core.viewport);
     if (igl::point_in_poly(stroke2DPoints, proj[0], proj[1]))
       is_selected[vi] = 1;
 
@@ -179,8 +166,8 @@ void Lasso::strokeFinish(Eigen::VectorXi &selected_vertices)
     Eigen::Vector3f t = region_centroids.row(i).transpose().cast<float>();
     Eigen::Vector3f proj = igl::project(t,
                                         modelview,
-                                        viewercore.proj,
-                                        viewercore.viewport);
+                                        viewer.core.proj,
+                                        viewer.core.viewport);
     float depth = proj[2];
     if (mind > depth)
     {

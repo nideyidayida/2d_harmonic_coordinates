@@ -52,38 +52,28 @@ Eigen::Vector4f rotation(0,0,0,1.);
 //per vertex color array, #V x3
 Eigen::MatrixXd vertex_colors;
 
-//Tweakbar
-TwBar *mybar;
-
 //function declarations (see below for implementation)
-bool solve(igl::Viewer& viewer);
+bool solve(igl::viewer::Viewer& viewer);
 void get_new_handle_locations();
-Eigen::Vector3f computeTranslation (igl::Viewer& viewer, int mouse_x, int from_x, int mouse_y, int from_y, Eigen::RowVector3d pt3D);
-Eigen::Vector4f computeRotation(igl::Viewer& viewer, int mouse_x, int from_x, int mouse_y, int from_y, Eigen::RowVector3d pt3D);
+Eigen::Vector3f computeTranslation (igl::viewer::Viewer& viewer, int mouse_x, int from_x, int mouse_y, int from_y, Eigen::RowVector3d pt3D);
+Eigen::Vector4f computeRotation(igl::viewer::Viewer& viewer, int mouse_x, int from_x, int mouse_y, int from_y, Eigen::RowVector3d pt3D);
 void compute_handle_centroids();
 Eigen::MatrixXd readMatrix(const char *filename);
 
-bool callback_mouse_down(igl::Viewer& viewer, int button, int modifier);
-bool callback_mouse_move(igl::Viewer& viewer, int mouse_x, int mouse_y);
-bool callback_mouse_up(igl::Viewer& viewer, int button, int modifier);
-bool callback_pre_draw(igl::Viewer& viewer);
-bool callback_init(igl::Viewer& viewer);
-bool callback_key_down(igl::Viewer& viewer, unsigned char key, int modifiers);
+bool callback_mouse_down(igl::viewer::Viewer& viewer, int button, int modifier);
+bool callback_mouse_move(igl::viewer::Viewer& viewer, int mouse_x, int mouse_y);
+bool callback_mouse_up(igl::viewer::Viewer& viewer, int button, int modifier);
+bool callback_pre_draw(igl::viewer::Viewer& viewer);
+bool callback_key_down(igl::viewer::Viewer& viewer, unsigned char key, int modifiers);
 void clearSelection();
-void TW_CALL ClearSelectionCB(void *clientData);
+//void TW_CALL ClearSelectionCB(void *clientData);
 void onNewHandleID();
 void applySelection();
-void TW_CALL ApplySelectionCB(void *clientData);
-void loadConstraints();
-void TW_CALL LoadConstraintsCB(void *clientData);
-void saveConstraints();
-void TW_CALL SaveConstraintsCB(void *clientData);
 void clearConstraints();
-void TW_CALL ClearConstraintsCB(void *clientData);
 
 
 
-bool solve(igl::Viewer& viewer)
+bool solve(igl::viewer::Viewer& viewer)
 {
   /**** Add your code for computing the deformation from handle_vertex_positions and handle_vertices here (replace following line) ****/
   igl::slice_into(handle_vertex_positions, handle_vertices, 1, V);
@@ -127,15 +117,47 @@ int main(int argc, char *argv[])
   }
   
   // Read mesh
-  igl::readOFF(argv[1],V,F);
+  igl::readOBJ(argv[1],V,F);
+  assert(V.rows() > 0);
     
   handle_id.setConstant(V.rows(), 1, -1);
   
   
   // Plot the mesh
-  igl::Viewer viewer;
+  igl::viewer::Viewer viewer;
   viewer.callback_key_down = callback_key_down;
-  viewer.callback_init = callback_init;
+  viewer.callback_init = [&](igl::viewer::Viewer& viewer)
+  {
+
+      viewer.ngui->addGroup("Param Demo");
+
+      viewer.ngui->addVariable<MouseMode >("MouseMode",mouse_mode)->setItems({"SELECT", "TRANSLATE", "ROTATE", "NONE"});
+
+      viewer.ngui->addButton("ClearSelection",[](){ selected_v.resize(0,1); });
+      viewer.ngui->addButton("ApplySelection",[](){ applySelection(); });
+      viewer.ngui->addButton("ClearConstraints",[](){ clearConstraints(); });
+      viewer.ngui->addButton("LoadConstraints",[](){
+          clearConstraints();
+          std::string filename = igl::file_dialog_open();
+          if (filename.empty())
+            return;
+          Eigen::MatrixXd mat = readMatrix(filename.c_str());
+          handle_id = mat.leftCols(1).cast<int>();
+      });
+      viewer.ngui->addButton("SaveConstraints",[](){
+          std::string filename = igl::file_dialog_save();
+          if (filename.empty())
+            return;
+          ofstream ofs;
+          ofs.open(filename, ofstream::out);
+          ofs<<handle_id<<endl;
+          ofs.close();
+      });
+
+      viewer.screen->performLayout();
+      return false;
+  };
+
   viewer.callback_mouse_down = callback_mouse_down;
   viewer.callback_mouse_move = callback_mouse_move;
   viewer.callback_mouse_up = callback_mouse_up;
@@ -146,7 +168,7 @@ int main(int argc, char *argv[])
   
   
   // Initialize selector
-  lasso = new Lasso(V, F, viewer.core);
+  lasso = new Lasso(V, F, viewer);
   
   viewer.core.point_size = 10;
   
@@ -154,9 +176,9 @@ int main(int argc, char *argv[])
 }
 
 
-bool callback_mouse_down(igl::Viewer& viewer, int button, int modifier)
+bool callback_mouse_down(igl::viewer::Viewer& viewer, int button, int modifier)
 {
-  if (button == igl::Viewer::IGL_RIGHT)
+  if (button == (int) igl::viewer::Viewer::MouseButton::Right)
     return false;
   
   down_mouse_x = viewer.current_mouse_x;
@@ -180,7 +202,7 @@ bool callback_mouse_down(igl::Viewer& viewer, int button, int modifier)
   return doit;
 }
 
-bool callback_mouse_move(igl::Viewer& viewer, int mouse_x, int mouse_y)
+bool callback_mouse_move(igl::viewer::Viewer& viewer, int mouse_x, int mouse_y)
 {
   if (!doit)
     return false;
@@ -217,7 +239,7 @@ bool callback_mouse_move(igl::Viewer& viewer, int mouse_x, int mouse_y)
   return false;
 }
 
-bool callback_mouse_up(igl::Viewer& viewer, int button, int modifier)
+bool callback_mouse_up(igl::viewer::Viewer& viewer, int button, int modifier)
 {
   if (!doit)
     return false;
@@ -249,7 +271,7 @@ bool callback_mouse_up(igl::Viewer& viewer, int button, int modifier)
 };
 
 
-bool callback_pre_draw(igl::Viewer& viewer)
+bool callback_pre_draw(igl::viewer::Viewer& viewer)
 {
   // Initialize vertex colors
   vertex_colors = Eigen::MatrixXd::Constant(V.rows(),3,.9);
@@ -328,36 +350,7 @@ bool callback_pre_draw(igl::Viewer& viewer)
   return false;
 }
 
-//Initialize tweakbar
-bool callback_init(igl::Viewer& viewer)
-{
-  mybar = TwNewBar("ParamDemo");
-  // change default tweak bar size and color
-  TwDefine(" ParamDemo size='200 250' color='76 76 127' position='230 16' fontresizable=true");
-  // add parameter for tweaking
-  TwEnumVal MouseModeEV[NUM_MOUSE_MODE] = {
-    {SELECT,"SELECT"},
-    {TRANSLATE,"TRANSLATE"},
-    {ROTATE, "ROTATE"},
-    {NONE, "NONE"},
-  };
-  
-  TwType MouseModeTW = TwDefineEnum("MouseMode", MouseModeEV, NUM_MOUSE_MODE);
-  TwAddVarRW(mybar, "Mouse Mode", MouseModeTW, &mouse_mode,"");
-  
-  // add button with callback function
-  TwAddButton(mybar,"ClearSelection", ClearSelectionCB, &viewer, " ");
-  TwAddButton(mybar,"ApplySelection", ApplySelectionCB, &viewer, " ");
-  TwAddButton(mybar,"ClearConstraints", ClearConstraintsCB, &viewer, " ");
-  TwAddButton(mybar,"LoadConstraints", LoadConstraintsCB, &viewer, " ");
-  TwAddButton(mybar,"SaveConstraints", SaveConstraintsCB, &viewer, " ");
-  TwAddSeparator(mybar, "", "");
-  return false;
-}
-
-
-
-bool callback_key_down(igl::Viewer& viewer, unsigned char key, int modifiers)
+bool callback_key_down(igl::viewer::Viewer& viewer, unsigned char key, int modifiers)
 {
   if (key == 'S')
   {
@@ -384,18 +377,6 @@ bool callback_key_down(igl::Viewer& viewer, unsigned char key, int modifiers)
   }
   return false;
 }
-
-
-void clearSelection()
-{
-  selected_v.resize(0,1);
-}
-
-void TW_CALL ClearSelectionCB(void *clientData)
-{
-  clearSelection();
-}
-
 
 void onNewHandleID()
 {
@@ -428,56 +409,10 @@ void applySelection()
 }
 
 
-void TW_CALL ApplySelectionCB(void *clientData)
-{
-  applySelection();
-}
-
 void clearConstraints()
 {
   handle_id.setConstant(V.rows(),1,-1);
 }
-
-void TW_CALL ClearConstraintsCB(void *clientData)
-{
-  clearConstraints();
-}
-
-void loadConstraints()
-{
-  clearConstraints();
-  std::string filename = igl::file_dialog_open();
-  if (filename.empty())
-    return;
-  Eigen::MatrixXd mat = readMatrix(filename.c_str());
-  handle_id = mat.leftCols(1).cast<int>();
-  
-}
-
-void TW_CALL LoadConstraintsCB(void *clientData)
-{
-  loadConstraints();
-  onNewHandleID();
-}
-
-
-void saveConstraints()
-{
-  std::string filename = igl::file_dialog_save();
-  if (filename.empty())
-    return;
-  ofstream ofs;
-  ofs.open(filename, ofstream::out);
-  ofs<<handle_id<<endl;
-  ofs.close();
-  
-}
-
-void TW_CALL SaveConstraintsCB(void *clientData)
-{
-  saveConstraints();
-}
-
 
 void compute_handle_centroids()
 {
@@ -502,7 +437,7 @@ void compute_handle_centroids()
 }
 
 //computes translation for the vertices of the moving handle based on the mouse motion
-Eigen::Vector3f computeTranslation (igl::Viewer& viewer,
+Eigen::Vector3f computeTranslation (igl::viewer::Viewer& viewer,
                                     int mouse_x,
                                     int from_x,
                                     int mouse_y,
@@ -544,7 +479,7 @@ Eigen::Vector3f computeTranslation (igl::Viewer& viewer,
 
 
 //computes translation for the vertices of the moving handle based on the mouse motion
-Eigen::Vector4f computeRotation(igl::Viewer& viewer,
+Eigen::Vector4f computeRotation(igl::viewer::Viewer& viewer,
                                 int mouse_x,
                                 int from_x,
                                 int mouse_y,
@@ -552,47 +487,47 @@ Eigen::Vector4f computeRotation(igl::Viewer& viewer,
                                 Eigen::RowVector3d pt3D)
 {
   
-  Eigen::Vector4f rotation;
-  rotation.setZero();
-  rotation[3] = 1.;
-  
-  Eigen::Matrix4f modelview = viewer.core.view * viewer.core.model;
-  
-  //initialize a trackball around the handle that is being rotated
-  //the trackball has (approximately) width w and height h
-  double w = viewer.core.viewport[2]/8;
-  double h = viewer.core.viewport[3]/8;
-  
-  //the mouse motion has to be expressed with respect to its center of mass
-  //(i.e. it should approximately fall inside the region of the trackball)
-  
-  //project the given point on the handle(centroid)
-  Eigen::Vector3f proj = igl::project(pt3D.transpose().cast<float>().eval(),
-                                      modelview,
-                                      viewer.core.proj,
-                                      viewer.core.viewport);
-  proj[1] = viewer.core.viewport[3] - proj[1];
-  
-  //express the mouse points w.r.t the centroid
-  from_x -= proj[0]; mouse_x -= proj[0];
-  from_y -= proj[1]; mouse_y -= proj[1];
-  
-  //shift so that the range is from 0-w and 0-h respectively (similarly to a standard viewport)
-  from_x += w/2; mouse_x += w/2;
-  from_y += h/2; mouse_y += h/2;
-  
-  //get rotation from trackball
-  Eigen::Vector4f drot = viewer.core.trackball_angle;
-  Eigen::Vector4f drot_conj;
-  igl::quat_conjugate(drot.data(), drot_conj.data());
-  igl::trackball(w, h, float(1.), rotation.data(), from_x, from_y, mouse_x, mouse_y, rotation.data());
-  
-  //account for the modelview rotation: prerotate by modelview (place model back to the original
-  //unrotated frame), postrotate by inverse modelview
-  Eigen::Vector4f out;
-  igl::quat_mult(rotation.data(), drot.data(), out.data());
-  igl::quat_mult(drot_conj.data(), out.data(), rotation.data());
-  return rotation;
+//  Eigen::Vector4f rotation;
+//  rotation.setZero();
+//  rotation[3] = 1.;
+//
+//  Eigen::Matrix4f modelview = viewer.core.view * viewer.core.model;
+//
+//  //initialize a trackball around the handle that is being rotated
+//  //the trackball has (approximately) width w and height h
+//  double w = viewer.core.viewport[2]/8;
+//  double h = viewer.core.viewport[3]/8;
+//
+//  //the mouse motion has to be expressed with respect to its center of mass
+//  //(i.e. it should approximately fall inside the region of the trackball)
+//
+//  //project the given point on the handle(centroid)
+//  Eigen::Vector3f proj = igl::project(pt3D.transpose().cast<float>().eval(),
+//                                      modelview,
+//                                      viewer.core.proj,
+//                                      viewer.core.viewport);
+//  proj[1] = viewer.core.viewport[3] - proj[1];
+//
+//  //express the mouse points w.r.t the centroid
+//  from_x -= proj[0]; mouse_x -= proj[0];
+//  from_y -= proj[1]; mouse_y -= proj[1];
+//
+//  //shift so that the range is from 0-w and 0-h respectively (similarly to a standard viewport)
+//  from_x += w/2; mouse_x += w/2;
+//  from_y += h/2; mouse_y += h/2;
+//
+//  //get rotation from trackball
+//  Eigen::Vector4f drot = viewer.core.trackball_angle;
+//  Eigen::Vector4f drot_conj;
+//  igl::quat_conjugate(drot.data(), drot_conj.data());
+//  igl::trackball(w, h, float(1.), rotation.data(), from_x, from_y, mouse_x, mouse_y, rotation.data());
+//
+//  //account for the modelview rotation: prerotate by modelview (place model back to the original
+//  //unrotated frame), postrotate by inverse modelview
+//  Eigen::Vector4f out;
+//  igl::quat_mult(rotation.data(), drot.data(), out.data());
+//  igl::quat_mult(drot_conj.data(), out.data(), rotation.data());
+//  return rotation;
   
 }
 
