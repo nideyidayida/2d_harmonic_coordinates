@@ -1,11 +1,3 @@
-//
-//  Colors.h
-//  ex5
-//
-//  Created by Olga Diamanti on 24/04/15.
-//
-//
-
 #ifndef ex5_Colors_h
 #define ex5_Colors_h
 

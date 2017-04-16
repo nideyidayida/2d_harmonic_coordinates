@@ -1,11 +1,3 @@
-//
-//  Colors.cpp
-//  ex5
-//
-//  Created by Olga Diamanti on 24/04/15.
-//
-//
-
 #include "Colors.h"
 
 double regionColors[MAXNUMREGIONS][3]= {

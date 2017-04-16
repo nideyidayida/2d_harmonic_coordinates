@@ -1,11 +1,7 @@
 #include <igl/readOFF.h>
 #include <igl/viewer/Viewer.h>
-#include <igl/file_dialog_open.h>
 #include <igl/slice_into.h>
 #include <igl/rotate_by_quat.h>
-#include <igl/trackball.h>
-#include <igl/quat_conjugate.h>
-#include <igl/quat_mult.h>
 
 #include "Lasso.h"
 #include "Colors.h"
@@ -23,7 +19,6 @@ Eigen::MatrixXi F(0,3);
 
 //mouse interaction
 enum MouseMode { SELECT, TRANSLATE, ROTATE, NONE };
-#define NUM_MOUSE_MODE 4
 MouseMode mouse_mode = NONE;
 bool doit = false;
 int down_mouse_x = -1, down_mouse_y = -1;
@@ -65,11 +60,8 @@ bool callback_mouse_move(igl::viewer::Viewer& viewer, int mouse_x, int mouse_y);
 bool callback_mouse_up(igl::viewer::Viewer& viewer, int button, int modifier);
 bool callback_pre_draw(igl::viewer::Viewer& viewer);
 bool callback_key_down(igl::viewer::Viewer& viewer, unsigned char key, int modifiers);
-void clearSelection();
-//void TW_CALL ClearSelectionCB(void *clientData);
 void onNewHandleID();
 void applySelection();
-void clearConstraints();
 
 
 
@@ -133,26 +125,9 @@ int main(int argc, char *argv[])
 
       viewer.ngui->addVariable<MouseMode >("MouseMode",mouse_mode)->setItems({"SELECT", "TRANSLATE", "ROTATE", "NONE"});
 
-      viewer.ngui->addButton("ClearSelection",[](){ selected_v.resize(0,1); });
+//      viewer.ngui->addButton("ClearSelection",[](){ selected_v.resize(0,1); });
       viewer.ngui->addButton("ApplySelection",[](){ applySelection(); });
-      viewer.ngui->addButton("ClearConstraints",[](){ clearConstraints(); });
-      viewer.ngui->addButton("LoadConstraints",[](){
-          clearConstraints();
-          std::string filename = igl::file_dialog_open();
-          if (filename.empty())
-            return;
-          Eigen::MatrixXd mat = readMatrix(filename.c_str());
-          handle_id = mat.leftCols(1).cast<int>();
-      });
-      viewer.ngui->addButton("SaveConstraints",[](){
-          std::string filename = igl::file_dialog_save();
-          if (filename.empty())
-            return;
-          ofstream ofs;
-          ofs.open(filename, ofstream::out);
-          ofs<<handle_id<<endl;
-          ofs.close();
-      });
+      viewer.ngui->addButton("ClearConstraints",[](){ handle_id.setConstant(V.rows(),1,-1); });
 
       viewer.screen->performLayout();
       return false;
@@ -296,7 +271,7 @@ bool callback_pre_draw(igl::viewer::Viewer& viewer)
   viewer.data.set_edges(Eigen::MatrixXd::Zero(0,3), Eigen::MatrixXi::Zero(0,3), Eigen::MatrixXd::Zero(0,3));
   
   //draw the stroke of the selection
-  for (int i = 0; i<lasso->strokePoints.size(); ++i)
+  for (unsigned int i = 0; i<lasso->strokePoints.size(); ++i)
   {
     viewer.data.add_points(lasso->strokePoints[i],Eigen::RowVector3d(0.4,0.4,0.4));
     if (i>1)
@@ -407,12 +382,6 @@ void applySelection()
   onNewHandleID();
 }
 
-
-void clearConstraints()
-{
-  handle_id.setConstant(V.rows(),1,-1);
-}
-
 void compute_handle_centroids()
 {
   //compute centroids of handles
@@ -486,90 +455,46 @@ Eigen::Vector4f computeRotation(igl::viewer::Viewer& viewer,
                                 Eigen::RowVector3d pt3D)
 {
   
-//  Eigen::Vector4f rotation;
-//  rotation.setZero();
-//  rotation[3] = 1.;
-//
-//  Eigen::Matrix4f modelview = viewer.core.view * viewer.core.model;
-//
-//  //initialize a trackball around the handle that is being rotated
-//  //the trackball has (approximately) width w and height h
-//  double w = viewer.core.viewport[2]/8;
-//  double h = viewer.core.viewport[3]/8;
-//
-//  //the mouse motion has to be expressed with respect to its center of mass
-//  //(i.e. it should approximately fall inside the region of the trackball)
-//
-//  //project the given point on the handle(centroid)
-//  Eigen::Vector3f proj = igl::project(pt3D.transpose().cast<float>().eval(),
-//                                      modelview,
-//                                      viewer.core.proj,
-//                                      viewer.core.viewport);
-//  proj[1] = viewer.core.viewport[3] - proj[1];
-//
-//  //express the mouse points w.r.t the centroid
-//  from_x -= proj[0]; mouse_x -= proj[0];
-//  from_y -= proj[1]; mouse_y -= proj[1];
-//
-//  //shift so that the range is from 0-w and 0-h respectively (similarly to a standard viewport)
-//  from_x += w/2; mouse_x += w/2;
-//  from_y += h/2; mouse_y += h/2;
-//
-//  //get rotation from trackball
-//  Eigen::Vector4f drot = viewer.core.trackball_angle;
-//  Eigen::Vector4f drot_conj;
-//  igl::quat_conjugate(drot.data(), drot_conj.data());
-//  igl::trackball(w, h, float(1.), rotation.data(), from_x, from_y, mouse_x, mouse_y, rotation.data());
-//
-//  //account for the modelview rotation: prerotate by modelview (place model back to the original
-//  //unrotated frame), postrotate by inverse modelview
-//  Eigen::Vector4f out;
-//  igl::quat_mult(rotation.data(), drot.data(), out.data());
-//  igl::quat_mult(drot_conj.data(), out.data(), rotation.data());
-//  return rotation;
+  Eigen::Vector4f rotation;
+  rotation.setZero();
+  rotation[3] = 1.;
+
+  Eigen::Matrix4f modelview = viewer.core.view * viewer.core.model;
+
+  //initialize a trackball around the handle that is being rotated
+  //the trackball has (approximately) width w and height h
+  double w = viewer.core.viewport[2]/8;
+  double h = viewer.core.viewport[3]/8;
+
+  //the mouse motion has to be expressed with respect to its center of mass
+  //(i.e. it should approximately fall inside the region of the trackball)
+
+  //project the given point on the handle(centroid)
+  Eigen::Vector3f proj = igl::project(pt3D.transpose().cast<float>().eval(),
+                                      modelview,
+                                      viewer.core.proj,
+                                      viewer.core.viewport);
+  proj[1] = viewer.core.viewport[3] - proj[1];
+
+  //express the mouse points w.r.t the centroid
+  from_x -= proj[0]; mouse_x -= proj[0];
+  from_y -= proj[1]; mouse_y -= proj[1];
+
+  //shift so that the range is from 0-w and 0-h respectively (similarly to a standard viewport)
+  from_x += w/2; mouse_x += w/2;
+  from_y += h/2; mouse_y += h/2;
+
+  //get rotation from trackball
+  Eigen::Vector4f drot = viewer.core.trackball_angle.coeffs();
+  Eigen::Vector4f drot_conj;
+  igl::quat_conjugate(drot.data(), drot_conj.data());
+  igl::trackball(w, h, float(1.), rotation.data(), from_x, from_y, mouse_x, mouse_y, rotation.data());
+
+  //account for the modelview rotation: prerotate by modelview (place model back to the original
+  //unrotated frame), postrotate by inverse modelview
+  Eigen::Vector4f out;
+  igl::quat_mult(rotation.data(), drot.data(), out.data());
+  igl::quat_mult(drot_conj.data(), out.data(), rotation.data());
+  return rotation;
   
 }
-
-#define MAXBUFSIZE  ((int) 1e6)
-Eigen::MatrixXd readMatrix(const char *filename)
-{
-  int cols = 0, rows = 0;
-  double buff[MAXBUFSIZE];
-  
-  // Read numbers from file into buffer.
-  ifstream infile;
-  infile.open(filename);
-  if (!infile.is_open())
-    return Eigen::MatrixXd::Zero(0, 0);
-  
-  while (! infile.eof())
-  {
-    string line;
-    getline(infile, line);
-    
-    int temp_cols = 0;
-    stringstream stream(line);
-    while(! stream.eof())
-      stream >> buff[cols*rows+temp_cols++];
-    
-    if (temp_cols == 0)
-      continue;
-    
-    if (cols == 0)
-      cols = temp_cols;
-    
-    rows++;
-  }
-  
-  infile.close();
-  
-  rows--;
-  
-  // Populate matrix with numbers.
-  Eigen::MatrixXd result(rows,cols);
-  for (int i = 0; i < rows; i++)
-    for (int j = 0; j < cols; j++)
-      result(i,j) = buff[ cols*i+j ];
-  
-  return result;
-};
