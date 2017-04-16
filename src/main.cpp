@@ -69,10 +69,10 @@ bool solve(igl::viewer::Viewer& viewer)
 {
   /**** Add your code for computing the deformation from handle_vertex_positions and handle_vertices here (replace following line) ****/
   igl::slice_into(handle_vertex_positions, handle_vertices, 1, V);
-  
+
   viewer.data.clear();
   viewer.data.set_mesh(V, F);
-  
+
   return true;
 };
 
@@ -104,17 +104,17 @@ int main(int argc, char *argv[])
 {
   if (argc != 2)
   {
-    cout << "Usage ex1_bin mesh.obj" << endl;
+    cout << "Usage ex1_bin mesh.off" << endl;
     exit(0);
   }
-  
+
   // Read mesh
-  igl::readOBJ(argv[1],V,F);
+  igl::readOFF(argv[1],V,F);
   assert(V.rows() > 0);
-    
+
   handle_id.setConstant(V.rows(), 1, -1);
-  
-  
+
+
   // Plot the mesh
   igl::viewer::Viewer viewer;
   viewer.callback_key_down = callback_key_down;
@@ -137,16 +137,16 @@ int main(int argc, char *argv[])
   viewer.callback_mouse_move = callback_mouse_move;
   viewer.callback_mouse_up = callback_mouse_up;
   viewer.callback_pre_draw = callback_pre_draw;
-  
+
   viewer.data.clear();
   viewer.data.set_mesh(V, F);
-  
-  
+
+
   // Initialize selector
   lasso = new Lasso(V, F, viewer);
-  
+
   viewer.core.point_size = 10;
-  
+
   viewer.launch();
 }
 
@@ -155,10 +155,10 @@ bool callback_mouse_down(igl::viewer::Viewer& viewer, int button, int modifier)
 {
   if (button == (int) igl::viewer::Viewer::MouseButton::Right)
     return false;
-  
+
   down_mouse_x = viewer.current_mouse_x;
   down_mouse_y = viewer.current_mouse_y;
-  
+
   if (mouse_mode == SELECT)
   {
     if (lasso->strokeAdd(viewer.current_mouse_x, viewer.current_mouse_y) >=0)
@@ -209,7 +209,7 @@ bool callback_mouse_move(igl::viewer::Viewer& viewer, int mouse_x, int mouse_y)
     down_mouse_y = mouse_y;
 #endif
     return true;
-    
+
   }
   return false;
 }
@@ -225,7 +225,7 @@ bool callback_mouse_up(igl::viewer::Viewer& viewer, int button, int modifier)
     lasso->strokeFinish(selected_v);
     return true;
   }
-  
+
   if (mouse_mode == TRANSLATE || mouse_mode == ROTATE)
   {
 #ifdef UPDATE_ONLY_ON_UP
@@ -235,12 +235,12 @@ bool callback_mouse_up(igl::viewer::Viewer& viewer, int button, int modifier)
     translation.setZero();
     rotation.setZero(); rotation[3] = 1.;
     moving_handle = -1;
-    
+
     compute_handle_centroids();
-    
+
     return true;
   }
-  
+
   return false;
 };
 
@@ -249,7 +249,7 @@ bool callback_pre_draw(igl::viewer::Viewer& viewer)
 {
   // Initialize vertex colors
   vertex_colors = Eigen::MatrixXd::Constant(V.rows(),3,.9);
-  
+
   //first, color constraints
   int num = handle_id.maxCoeff();
   if (num ==0)
@@ -264,12 +264,12 @@ bool callback_pre_draw(igl::viewer::Viewer& viewer)
   for (int i = 0; i<selected_v.size(); ++i)
     vertex_colors.row(selected_v[i]) << 131./255, 131./255, 131./255.;
   viewer.data.set_colors(vertex_colors);
-  
-  
+
+
   //clear points and lines
   viewer.data.set_points(Eigen::MatrixXd::Zero(0,3), Eigen::MatrixXd::Zero(0,3));
   viewer.data.set_edges(Eigen::MatrixXd::Zero(0,3), Eigen::MatrixXi::Zero(0,3), Eigen::MatrixXd::Zero(0,3));
-  
+
   //draw the stroke of the selection
   for (unsigned int i = 0; i<lasso->strokePoints.size(); ++i)
   {
@@ -277,7 +277,7 @@ bool callback_pre_draw(igl::viewer::Viewer& viewer)
     if (i>1)
       viewer.data.add_edges(lasso->strokePoints[i-1], lasso->strokePoints[i], Eigen::RowVector3d(0.7,0.7,.7));
   }
-  
+
 #ifdef UPDATE_ONLY_ON_UP
   //draw only the moving parts with a white line
   if (moving_handle>=0)
@@ -295,8 +295,8 @@ bool callback_pre_draw(igl::viewer::Viewer& viewer)
         }
       if(firstPickedVertex==-1)
         continue;
-      
-      
+
+
       Eigen::Matrix3d points;
       for(int vi = 0; vi<3; ++vi)
       {
@@ -310,7 +310,7 @@ bool callback_pre_draw(igl::viewer::Viewer& viewer)
         }
         else
           points.row(vi) =  V.row(vertex_id);
-        
+
       }
       edges.row(num_edges++) << points.row(0), points.row(1);
       edges.row(num_edges++) << points.row(1), points.row(2);
@@ -318,7 +318,7 @@ bool callback_pre_draw(igl::viewer::Viewer& viewer)
     }
     edges.conservativeResize(num_edges, Eigen::NoChange);
     viewer.data.add_edges(edges.leftCols(3), edges.rightCols(3), Eigen::RowVector3d(0.9,0.9,0.9));
-    
+
   }
 #endif
   return false;
@@ -331,13 +331,13 @@ bool callback_key_down(igl::viewer::Viewer& viewer, unsigned char key, int modif
     mouse_mode = SELECT;
     return true;
   }
-  
+
   if (key == 'T' && modifiers == IGL_MOD_ALT)
   {
     mouse_mode = TRANSLATE;
     return true;
   }
-  
+
   if (key == 'R' && modifiers == IGL_MOD_ALT)
   {
     mouse_mode = ROTATE;
@@ -359,12 +359,12 @@ void onNewHandleID()
   int num_handle_vertices = V.rows() - numFree;
   handle_vertices.setZero(num_handle_vertices);
   handle_vertex_positions.setZero(num_handle_vertices,3);
-  
+
   int count = 0;
   for (long vi = 0; vi<V.rows(); ++vi)
     if(handle_id[vi] >=0)
       handle_vertices[count++] = vi;
-  
+
   compute_handle_centroids();
 }
 
@@ -378,7 +378,7 @@ void applySelection()
       handle_id[selected_vertex] = index;
   }
   selected_v.resize(0,1);
-  
+
   onNewHandleID();
 }
 
@@ -387,7 +387,7 @@ void compute_handle_centroids()
   //compute centroids of handles
   int num_handles = handle_id.maxCoeff()+1;
   handle_centroids.setZero(num_handles,3);
-  
+
   Eigen::VectorXi num; num.setZero(num_handles,1);
   for (long vi = 0; vi<V.rows(); ++vi)
   {
@@ -398,10 +398,10 @@ void compute_handle_centroids()
       num[r]++;
     }
   }
-  
+
   for (long i = 0; i<num_handles; ++i)
     handle_centroids.row(i) = handle_centroids.row(i).array()/num[i];
-  
+
 }
 
 //computes translation for the vertices of the moving handle based on the mouse motion
@@ -419,10 +419,10 @@ Eigen::Vector3f computeTranslation (igl::viewer::Viewer& viewer,
                                       viewer.core.proj,
                                       viewer.core.viewport);
   float depth = proj[2];
-  
+
   double x, y;
   Eigen::Vector3f pos1, pos0;
-  
+
   //unproject from- and to- points
   x = mouse_x;
   y = viewer.core.viewport(3) - mouse_y;
@@ -430,19 +430,19 @@ Eigen::Vector3f computeTranslation (igl::viewer::Viewer& viewer,
                         modelview,
                         viewer.core.proj,
                         viewer.core.viewport);
-  
-  
+
+
   x = from_x;
   y = viewer.core.viewport(3) - from_y;
   pos0 = igl::unproject(Eigen::Vector3f(x,y,depth),
                         modelview,
                         viewer.core.proj,
                         viewer.core.viewport);
-  
+
   //translation is the vector connecting the two
   Eigen::Vector3f translation = pos1 - pos0;
   return translation;
-  
+
 }
 
 
@@ -454,7 +454,7 @@ Eigen::Vector4f computeRotation(igl::viewer::Viewer& viewer,
                                 int from_y,
                                 Eigen::RowVector3d pt3D)
 {
-  
+
   Eigen::Vector4f rotation;
   rotation.setZero();
   rotation[3] = 1.;
@@ -496,5 +496,5 @@ Eigen::Vector4f computeRotation(igl::viewer::Viewer& viewer,
   igl::quat_mult(rotation.data(), drot.data(), out.data());
   igl::quat_mult(drot_conj.data(), out.data(), rotation.data());
   return rotation;
-  
+
 }
