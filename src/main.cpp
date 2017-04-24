@@ -75,16 +75,14 @@ bool solve(igl::viewer::Viewer& viewer)
 void get_new_handle_locations()
 {
   int count = 0;
-  for (long vi = 0; vi<V.rows(); ++vi)
-    if(handle_id[vi] >=0)
+  for (long vi = 0; vi < V.rows(); ++vi)
+    if (handle_id[vi] >= 0)
     {
       Eigen::RowVector3f goalPosition = V.row(vi).cast<float>();
-      if(handle_id[vi] == moving_handle)
-      {
-        if( mouse_mode == TRANSLATE)
-        goalPosition+=translation;
-        else if (mouse_mode == ROTATE)
-        {
+      if (handle_id[vi] == moving_handle) {
+        if (mouse_mode == TRANSLATE)
+          goalPosition += translation;
+        else if (mouse_mode == ROTATE) {
           goalPosition -= handle_centroids.row(moving_handle).cast<float>();
           igl::rotate_by_quat(goalPosition.data(), rotation.data(), goalPosition.data());
           goalPosition += handle_centroids.row(moving_handle).cast<float>();
@@ -183,20 +181,22 @@ bool callback_mouse_move(igl::viewer::Viewer& viewer, int mouse_x, int mouse_y)
   }
   if ((mouse_mode == TRANSLATE) || (mouse_mode == ROTATE))
   {
-    if (mouse_mode == TRANSLATE)
+    if (mouse_mode == TRANSLATE) {
       translation = computeTranslation(viewer,
                                        mouse_x,
                                        down_mouse_x,
                                        mouse_y,
                                        down_mouse_y,
                                        handle_centroids.row(moving_handle));
-    else
+    }
+    else {
       rotation = computeRotation(viewer,
                                  mouse_x,
                                  down_mouse_x,
                                  mouse_y,
                                  down_mouse_y,
                                  handle_centroids.row(moving_handle));
+    }
     get_new_handle_locations();
 #ifndef UPDATE_ONLY_ON_UP
     solve(viewer);

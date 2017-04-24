@@ -107,81 +107,78 @@ void Lasso::strokeFinish(Eigen::VectorXi &selected_vertices)
   }
   
   //the selection might consist of front facing and back facing facets.
-  //we will only select the connected component that is the most frontal
+  //we will only select the connected component that is frontmost
   
-  //first, isolate the faces that have at least one selected vertex
+  //first, determine faces that have at least one selected vertex
   int nf = 0;
-  Eigen::MatrixXi Fsel(F.rows(),3);
-  for (int fi = 0; fi<F.rows(); ++fi)
-  {
-    bool mark = false;
-    for (int i = 0; i<3; ++i)
-      if (is_selected[F(fi,i)])
-      {
-        mark = true;
+  Eigen::MatrixXi Fsel(F.rows(), 3);
+  for (int fi = 0; fi<F.rows(); ++fi) {
+    for (int i = 0; i < 3; ++i) {
+      if (is_selected[F(fi, i)]) {
+        Fsel.row(nf++) = F.row(fi);
         break;
       }
-    if (mark)
-      Fsel.row(nf++) = F.row(fi);
-  }
-  Fsel.conservativeResize(nf, Eigen::NoChange);
-  //compute their barycenters
-  Eigen::MatrixXd MFsel;
-  igl::barycenter(V, Fsel, MFsel);
-
-  //now, find all connected components of selected faces
-  Eigen::VectorXi cid;
-  igl::facet_components(Fsel, cid);
-  
-  //compute centroids of connected components
-  int ncomp = cid.maxCoeff()+1;
-  Eigen::MatrixXd region_centroids;
-  region_centroids.setZero(ncomp,3);
-  Eigen::VectorXi total; total.setZero(ncomp,1);
-  for (long fi = 0; fi<Fsel.rows(); ++fi)
-  {
-    int r = cid[fi];
-    region_centroids.row(r) += MFsel.row(fi);
-    total[r]++;
-  }
-  for (long i = 0; i<ncomp; ++i)
-    region_centroids.row(i) = region_centroids.row(i).array()/total[i];
-
-  //project all centroids and isolate only the most frontal one
-  float mind = 1e10;
-  int r = -1;
-  for (long i = 0; i<ncomp; ++i)
-  {
-    Eigen::Vector3f t = region_centroids.row(i).transpose().cast<float>();
-    Eigen::Vector3f proj = igl::project(t,
-                                        modelview,
-                                        viewer.core.proj,
-                                        viewer.core.viewport);
-    float depth = proj[2];
-    if (mind > depth)
-    {
-      r = i;
-      mind = depth;
     }
   }
-  
-  //all vertices belonging to other components are unmarked
-  for (long fi = 0; fi<Fsel.rows(); ++fi)
-  {
-    if (cid[fi] != r)
-    for (int i = 0; i<3; ++i)
-      is_selected[Fsel(fi,i)] = 0;
+  Fsel.conservativeResize(nf, Eigen::NoChange);
+
+  // Determine the frontmost component, if there is any selection
+  if (Fsel.rows() > 0) {
+    //compute their barycenters
+    Eigen::MatrixXd MFsel;
+    igl::barycenter(V, Fsel, MFsel);
+
+    //now, find all connected components of selected faces
+    Eigen::VectorXi cid;
+    igl::facet_components(Fsel, cid);
+
+    //compute centroids of connected components
+    int ncomp = cid.maxCoeff()+1;
+    Eigen::MatrixXd region_centroids;
+    region_centroids.setZero(ncomp,3);
+    Eigen::VectorXi total; total.setZero(ncomp,1);
+    for (long fi = 0; fi<Fsel.rows(); ++fi)
+    {
+      int r = cid[fi];
+      region_centroids.row(r) += MFsel.row(fi);
+      total[r]++;
+    }
+    for (long i = 0; i<ncomp; ++i)
+      region_centroids.row(i) = region_centroids.row(i).array()/total[i];
+
+    //project all centroids and isolate only the most frontal one
+    float mind = 1e10;
+    int r = -1;
+    for (long i = 0; i<ncomp; ++i)
+    {
+      Eigen::Vector3f t = region_centroids.row(i).transpose().cast<float>();
+      Eigen::Vector3f proj = igl::project(t,
+                                          modelview,
+                                          viewer.core.proj,
+                                          viewer.core.viewport);
+      float depth = proj[2];
+      if (mind > depth)
+      {
+        r = i;
+        mind = depth;
+      }
+    }
+
+    //all vertices belonging to other components are unmarked
+    for (long fi = 0; fi<Fsel.rows(); ++fi)
+    {
+      if (cid[fi] != r)
+      for (int i = 0; i<3; ++i)
+        is_selected[Fsel(fi,i)] = 0;
+    }
   }
 
   //return the selected vertices
-  int nc = is_selected.sum();
-  selected_vertices.resize(nc,1);
+  selected_vertices.resize(is_selected.sum(), 1);
   int num = 0;
-  for (int vi =0; vi<V.rows(); ++vi)
+  for (int vi =0; vi < V.rows(); ++vi)
     if (is_selected[vi])
       selected_vertices[num++] = vi;
-  
-  
 
   strokePoints.clear();
   stroke2DPoints.clear();
