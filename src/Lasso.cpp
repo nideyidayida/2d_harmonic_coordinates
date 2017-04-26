@@ -73,6 +73,7 @@ int Lasso::strokeAdd(int mouse_x,
                            fi,
                            bc))
     {
+      pt = V.row(F(fi,0))*bc(0) + V.row(F(fi,1))*bc(1) + V.row(F(fi,2))*bc(2);
       Eigen::Vector3f proj = igl::project(pt.transpose().cast<float>().eval(), modelview, viewer.core.proj,viewer.core.viewport);
       d = proj[2];
     }
@@ -180,6 +181,11 @@ void Lasso::strokeFinish(Eigen::VectorXi &selected_vertices)
     if (is_selected[vi])
       selected_vertices[num++] = vi;
 
+  strokeReset();
+}
+
+void Lasso::strokeReset()
+{
   strokePoints.clear();
   stroke2DPoints.clear();
   d = -1;

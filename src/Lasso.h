@@ -23,6 +23,7 @@ private:
 public:
   int strokeAdd(int mouse_x, int mouse_y);
   void strokeFinish(Eigen::VectorXi &selected_vertices);
+  void strokeReset();
   int pickVertex(int mouse_x, int mouse_y);
   //the stroke
   std::vector< Eigen::Matrix<double, 1,3>  > strokePoints;

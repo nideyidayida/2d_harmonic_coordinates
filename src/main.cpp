@@ -156,6 +156,8 @@ bool callback_mouse_down(igl::viewer::Viewer& viewer, int button, int modifier)
   {
     if (lasso->strokeAdd(viewer.current_mouse_x, viewer.current_mouse_y) >=0)
       doit = true;
+    else
+      lasso->strokeReset();
   }
   else if ((mouse_mode == TRANSLATE) || (mouse_mode == ROTATE))
   {
@@ -272,6 +274,12 @@ bool callback_pre_draw(igl::viewer::Viewer& viewer)
     if (i>1)
       viewer.data.add_edges(lasso->strokePoints[i-1], lasso->strokePoints[i], Eigen::RowVector3d(0.7,0.7,.7));
   }
+
+  // update the vertex position all the time
+  viewer.data.V.resize(V.rows(),3);
+  viewer.data.V << V;
+
+  viewer.data.dirty |= viewer.data.DIRTY_POSITION;
 
 #ifdef UPDATE_ONLY_ON_UP
   //draw only the moving parts with a white line
