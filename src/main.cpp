@@ -2,9 +2,14 @@
 #include <igl/viewer/Viewer.h>
 #include <igl/slice_into.h>
 #include <igl/rotate_by_quat.h>
+#include <igl/cotmatrix.h>
+#include <igl/massmatrix.h>
+#include <igl/invert_diag.h>
+#include <igl/slice.h>
+#include <igl/triangle/triangulate.h>
+#include <igl/project.h>
+#include <igl/unproject.h>
 
-#include "Lasso.h"
-#include "Colors.h"
 
 //activate this for alternate UI (easier to debug)
 //#define UPDATE_ONLY_ON_UP
@@ -12,45 +17,41 @@
 using namespace std;
 
 //vertex array, #V x3
-Eigen::MatrixXd V(0,3);
+Eigen::MatrixXd V3D(0,3);
+//vertex array, #V x2
+Eigen::MatrixXd V(0,2);
 //face array, #F x3
 Eigen::MatrixXi F(0,3);
 
+//cage vertex array, #C x2
+Eigen::MatrixXd C(0,2);
+//cage edge arary, #C x2
+Eigen::MatrixXi E(0,2);
+//vertex array after triangulation, #V2 x2
+Eigen::MatrixXd V2;
+//face array after triangulation, #F2 x3
+Eigen::MatrixXi F2;
+//cage function, #V2-#C x#C
+Eigen::MatrixXd Hfunction(0,0);
+
 //mouse interaction
-enum MouseMode { SELECT, TRANSLATE, ROTATE, NONE };
+enum MouseMode { SELECT, TRANSLATE, NONE };
 MouseMode mouse_mode = NONE;
 bool doit = false;
 int down_mouse_x = -1, down_mouse_y = -1;
 
-//for selecting vertices
-std::unique_ptr<Lasso> lasso;
-//list of currently selected vertices
-Eigen::VectorXi selected_v(0,1);
-
-//for saving constrained vertices
-//vertex-to-handle index, #V x1 (-1 if vertex is free)
-Eigen::VectorXi handle_id(0,1);
-//list of all vertices belonging to handles, #HV x1
-Eigen::VectorXi handle_vertices(0,1);
-//centroids of handle regions, #H x1
-Eigen::MatrixXd handle_centroids(0,3);
-//updated positions of handle vertices, #HV x3
-Eigen::MatrixXd handle_vertex_positions(0,3);
-//index of handle being moved
-int moving_handle = -1;
-//rotation and translation for the handle being moved
-Eigen::Vector3f translation(0,0,0);
-Eigen::Vector4f rotation(0,0,0,1.);
+//index of cage vertex being moved
+int moving_cage = -1;
 
 //per vertex color array, #V x3
 Eigen::MatrixXd vertex_colors;
 
 //function declarations (see below for implementation)
 bool solve(igl::viewer::Viewer& viewer);
-void get_new_handle_locations();
-Eigen::Vector3f computeTranslation (igl::viewer::Viewer& viewer, int mouse_x, int from_x, int mouse_y, int from_y, Eigen::RowVector3d pt3D);
-Eigen::Vector4f computeRotation(igl::viewer::Viewer& viewer, int mouse_x, int from_x, int mouse_y, int from_y, Eigen::RowVector3d pt3D);
-void compute_handle_centroids();
+Eigen::MatrixXd computeH();
+void addCageVertex(Eigen::RowVector2d cageP);
+int getMovnCage(Eigen::RowVector2d cageP);
+Eigen::RowVector2d pickPoint(igl::viewer::Viewer& viewer, int mouse_x, int mouse_y);
 Eigen::MatrixXd readMatrix(const char *filename);
 
 bool callback_mouse_down(igl::viewer::Viewer& viewer, int button, int modifier);
@@ -58,52 +59,33 @@ bool callback_mouse_move(igl::viewer::Viewer& viewer, int mouse_x, int mouse_y);
 bool callback_mouse_up(igl::viewer::Viewer& viewer, int button, int modifier);
 bool callback_pre_draw(igl::viewer::Viewer& viewer);
 bool callback_key_down(igl::viewer::Viewer& viewer, unsigned char key, int modifiers);
-void onNewHandleID();
-void applySelection();
 
 bool solve(igl::viewer::Viewer& viewer)
 {
-  /**** Add your code for computing the deformation from handle_vertex_positions and handle_vertices here (replace following line) ****/
-  igl::slice_into(handle_vertex_positions, handle_vertices, 1, V);
-
+  Eigen::MatrixXd newInternalP = Hfunction * C;
+  for (int v = 0; v < V.rows(); v++) {
+    V.row(v) = newInternalP.row(v);
+  }
+  
+  V3D.col(0) = V.col(0); V3D.col(1) = V.col(1);
+  
   return true;
 };
-
-void get_new_handle_locations()
-{
-  int count = 0;
-  for (long vi = 0; vi < V.rows(); ++vi)
-    if (handle_id[vi] >= 0)
-    {
-      Eigen::RowVector3f goalPosition = V.row(vi).cast<float>();
-      if (handle_id[vi] == moving_handle) {
-        if (mouse_mode == TRANSLATE)
-          goalPosition += translation;
-        else if (mouse_mode == ROTATE) {
-          goalPosition -= handle_centroids.row(moving_handle).cast<float>();
-          igl::rotate_by_quat(goalPosition.data(), rotation.data(), goalPosition.data());
-          goalPosition += handle_centroids.row(moving_handle).cast<float>();
-        }
-      }
-      handle_vertex_positions.row(count++) = goalPosition.cast<double>();
-    }
-}
-
 
 int main(int argc, char *argv[])
 {
   if (argc != 2)
   {
-    cout << "Usage assignment5_bin mesh.off" << endl;
+    cout << "Usage project mesh.off" << endl;
     exit(0);
   }
 
   // Read mesh
-  igl::readOFF(argv[1],V,F);
-  assert(V.rows() > 0);
+  igl::readOFF(argv[1],V3D,F);
+  assert(V3D.rows() > 0);
 
-  handle_id.setConstant(V.rows(), 1, -1);
-
+  V.resize(V3D.rows(), 2);
+  V.col(0) = V3D.col(0); V.col(1) = V3D.col(1);
 
   // Plot the mesh
   igl::viewer::Viewer viewer;
@@ -113,11 +95,9 @@ int main(int argc, char *argv[])
 
       viewer.ngui->addGroup("Deformation Controls");
 
-      viewer.ngui->addVariable<MouseMode >("MouseMode",mouse_mode)->setItems({"SELECT", "TRANSLATE", "ROTATE", "NONE"});
+      viewer.ngui->addVariable<MouseMode >("MouseMode",mouse_mode)->setItems({"SELECT", "TRANSLATE", "NONE"});
 
 //      viewer.ngui->addButton("ClearSelection",[](){ selected_v.resize(0,1); });
-      viewer.ngui->addButton("ApplySelection",[](){ applySelection(); });
-      viewer.ngui->addButton("ClearConstraints",[](){ handle_id.setConstant(V.rows(),1,-1); });
 
       viewer.screen->performLayout();
       return false;
@@ -129,10 +109,7 @@ int main(int argc, char *argv[])
   viewer.callback_pre_draw = callback_pre_draw;
 
   viewer.data.clear();
-  viewer.data.set_mesh(V, F);
-
-  // Initialize selector
-  lasso = std::unique_ptr<Lasso>(new Lasso(V, F, viewer));
+  viewer.data.set_mesh(V3D, F);
 
   viewer.core.point_size = 10;
   viewer.core.set_rotation_type(igl::viewer::ViewerCore::ROTATION_TYPE_TRACKBALL);
@@ -140,6 +117,79 @@ int main(int argc, char *argv[])
   viewer.launch();
 }
 
+void addCageVertex(Eigen::RowVector2d cageP) {
+  C.conservativeResize(C.rows()+1, 2);
+  C.row(C.rows()-1) = cageP;
+  
+  // connect cage vertices.
+  E.resize(C.rows(), 2);
+  for (int c = 0; c < C.rows(); c++) {
+    E(c, 0) = c;
+    E(c, 1) = (c+1) % C.rows();
+  }
+}
+
+Eigen::MatrixXd computeH() {
+  Eigen::MatrixXd CV(C.rows()+V.rows(), 2);
+  CV << C, V;
+  Eigen::MatrixXd H;
+  igl::triangle::triangulate(CV, E, H, "a100.0.05q", V2, F2);
+  // compute bi-Laplacian coefficient.
+  Eigen::SparseMatrix<double> L, M, Minv;
+  igl::cotmatrix(V2, F2, L);
+  igl::massmatrix(V2, F2, igl::MASSMATRIX_TYPE_VORONOI, M);
+  igl::invert_diag(M, Minv);
+  Eigen::SparseMatrix<double> A = L * Minv * L;
+
+  // extract Aff and Afc from A.
+  Eigen::MatrixXi internalP(V2.rows() - C.rows(), 1);
+  Eigen::MatrixXi cageC(C.rows(), 1);
+  for (int v = 0; v < V2.rows()-C.rows(); v++) {
+    internalP(v, 0) = v + C.rows();
+  }
+  for (int c = 0; c < C.rows(); c++) {
+    cageC(c, 0) = c;
+  }
+  Eigen::SparseMatrix<double> Aff, Afc;
+  igl::slice(A, internalP, internalP, Aff);
+  igl::slice(A, internalP, cageC, Afc);
+
+  // solve for H.
+  Eigen::SimplicialLLT<Eigen::SparseMatrix<double>> solver;
+  solver.compute(Aff);
+  return solver.solve(-1*Eigen::MatrixXd(Afc));
+}
+
+int getMovnCage(Eigen::RowVector2d cageP) {
+  int movingCage = 0;
+  double distance = (C.row(0) - cageP).norm();
+  for (int c = 1; c < C.rows(); c++) {
+    double disTmp = (C.row(c) - cageP).norm();
+    if (disTmp < distance) {
+      distance = disTmp;
+      movingCage = c;
+    }
+  }
+  return movingCage;
+}
+
+Eigen::RowVector2d pickPoint(igl::viewer::Viewer& viewer, int mouse_x, int mouse_y) {
+  // Cast a ray in the view direction starting from the mouse position
+  double x = mouse_x;
+  double y = viewer.core.viewport(3) - mouse_y;  
+  Eigen::RowVector3d pt;  
+  Eigen::Matrix4f modelview = viewer.core.view * viewer.core.model;
+  // project selected point onto viewer window.
+  Eigen::Vector3f proj = igl::project(pt.transpose().cast<float>().eval(), modelview, viewer.core.proj,viewer.core.viewport);
+  float c = proj[2];
+  // unproject the point based on the object.
+  pt = igl::unproject(Eigen::Vector3f(x, y, c), modelview, viewer.core.proj, viewer.core.viewport).transpose().cast<double>();
+  
+  Eigen::RowVector2d pt2d;
+  pt2d(0) = pt(0); pt2d(1) = pt(1);
+
+  return pt2d;
+}
 
 bool callback_mouse_down(igl::viewer::Viewer& viewer, int button, int modifier)
 {
@@ -149,22 +199,12 @@ bool callback_mouse_down(igl::viewer::Viewer& viewer, int button, int modifier)
   down_mouse_x = viewer.current_mouse_x;
   down_mouse_y = viewer.current_mouse_y;
 
-  if (mouse_mode == SELECT)
-  {
-    if (lasso->strokeAdd(viewer.current_mouse_x, viewer.current_mouse_y) >=0)
-      doit = true;
-    else
-      lasso->strokeReset();
-  }
-  else if ((mouse_mode == TRANSLATE) || (mouse_mode == ROTATE))
-  {
-    int vi = lasso->pickVertex(viewer.current_mouse_x, viewer.current_mouse_y);
-    if(vi>=0 && handle_id[vi]>=0)  //if a region was found, mark it for translation/rotation
-    {
-      moving_handle = handle_id[vi];
-      get_new_handle_locations();
-      doit = true;
-    }
+  if (mouse_mode == SELECT) {
+    addCageVertex(pickPoint(viewer, viewer.current_mouse_x, viewer.current_mouse_y));
+    doit = true;
+  } else if (mouse_mode == TRANSLATE) {
+    moving_cage = getMovnCage(pickPoint(viewer, viewer.current_mouse_x, viewer.current_mouse_y));
+    doit = true;
   }
   return doit;
 }
@@ -173,37 +213,16 @@ bool callback_mouse_move(igl::viewer::Viewer& viewer, int mouse_x, int mouse_y)
 {
   if (!doit)
     return false;
-  if (mouse_mode == SELECT)
-  {
-    lasso->strokeAdd(mouse_x, mouse_y);
-    return true;
-  }
-  if ((mouse_mode == TRANSLATE) || (mouse_mode == ROTATE))
-  {
-    if (mouse_mode == TRANSLATE) {
-      translation = computeTranslation(viewer,
-                                       mouse_x,
-                                       down_mouse_x,
-                                       mouse_y,
-                                       down_mouse_y,
-                                       handle_centroids.row(moving_handle));
-    }
-    else {
-      rotation = computeRotation(viewer,
-                                 mouse_x,
-                                 down_mouse_x,
-                                 mouse_y,
-                                 down_mouse_y,
-                                 handle_centroids.row(moving_handle));
-    }
-    get_new_handle_locations();
+
+  if (mouse_mode == TRANSLATE) {
+    C.row(moving_cage) = (pickPoint(viewer, viewer.current_mouse_x, viewer.current_mouse_y));
+
 #ifndef UPDATE_ONLY_ON_UP
     solve(viewer);
     down_mouse_x = mouse_x;
     down_mouse_y = mouse_y;
 #endif
     return true;
-
   }
   return false;
 }
@@ -213,290 +232,70 @@ bool callback_mouse_up(igl::viewer::Viewer& viewer, int button, int modifier)
   if (!doit)
     return false;
   doit = false;
-  if (mouse_mode == SELECT)
-  {
-    selected_v.resize(0,1);
-    lasso->strokeFinish(selected_v);
-    return true;
-  }
 
-  if ((mouse_mode == TRANSLATE) || (mouse_mode == ROTATE))
-  {
+  if (mouse_mode == TRANSLATE) {
 #ifdef UPDATE_ONLY_ON_UP
-    if(moving_handle>=0)
+    if(moving_cage>=0)
       solve(viewer);
 #endif
-    translation.setZero();
-    rotation.setZero(); rotation[3] = 1.;
-    moving_handle = -1;
-
-    compute_handle_centroids();
+    moving_cage = -1;
 
     return true;
   }
-
   return false;
 };
-
 
 bool callback_pre_draw(igl::viewer::Viewer& viewer)
 {
   // Initialize vertex colors
   vertex_colors = Eigen::MatrixXd::Constant(V.rows(),3,.9);
 
-  //first, color constraints
-  int num = handle_id.maxCoeff();
-  if (num ==0)
-    num = 1;
-  for (int i = 0; i<V.rows(); ++i)
-    if (handle_id[i]!=-1)
-    {
-      int r = handle_id[i] % MAXNUMREGIONS;
-      vertex_colors.row(i) << regionColors[r][0], regionColors[r][1], regionColors[r][2];
-    }
-  //then, color selection
-  for (int i = 0; i<selected_v.size(); ++i)
-    vertex_colors.row(selected_v[i]) << 131./255, 131./255, 131./255.;
-  viewer.data.set_colors(vertex_colors);
-
-
   //clear points and lines
   viewer.data.set_points(Eigen::MatrixXd::Zero(0,3), Eigen::MatrixXd::Zero(0,3));
   viewer.data.set_edges(Eigen::MatrixXd::Zero(0,3), Eigen::MatrixXi::Zero(0,3), Eigen::MatrixXd::Zero(0,3));
 
-  //draw the stroke of the selection
-  for (unsigned int i = 0; i<lasso->strokePoints.size(); ++i)
-  {
-    viewer.data.add_points(lasso->strokePoints[i],Eigen::RowVector3d(0.4,0.4,0.4));
-    if (i>1)
-      viewer.data.add_edges(lasso->strokePoints[i-1], lasso->strokePoints[i], Eigen::RowVector3d(0.7,0.7,.7));
-  }
-
   // update the vertex position all the time
-  viewer.data.V.resize(V.rows(),3);
-  viewer.data.V << V;
+  viewer.data.V.resize(V3D.rows(),3);
+  viewer.data.V << V3D;
 
   viewer.data.dirty |= viewer.data.DIRTY_POSITION;
 
-#ifdef UPDATE_ONLY_ON_UP
-  //draw only the moving parts with a white line
-  if (moving_handle>=0)
-  {
-    Eigen::MatrixXd edges(3*F.rows(),6);
-    int num_edges = 0;
-    for (int fi = 0; fi<F.rows(); ++fi)
-    {
-      int firstPickedVertex = -1;
-      for(int vi = 0; vi<3 ; ++vi)
-        if (handle_id[F(fi,vi)] == moving_handle)
-        {
-          firstPickedVertex = vi;
-          break;
-        }
-      if(firstPickedVertex==-1)
-        continue;
+  Eigen::MatrixXd C3d(C.rows(), 3);
+  C3d.col(0) = C.col(0); C3d.col(1) = C.col(1);
+  viewer.data.add_points(C3d, Eigen::MatrixXd::Constant(C.rows(),3,.2));
+  viewer.data.set_edges(C3d, E, Eigen::MatrixXd::Constant(C.rows(),3,.2));
 
-
-      Eigen::Matrix3d points;
-      for(int vi = 0; vi<3; ++vi)
-      {
-        int vertex_id = F(fi,vi);
-        if (handle_id[vertex_id] == moving_handle)
-        {
-          int index = -1;
-          // if face is already constrained, find index in the constraints
-          (handle_vertices.array()-vertex_id).cwiseAbs().minCoeff(&index);
-          points.row(vi) = handle_vertex_positions.row(index);
-        }
-        else
-          points.row(vi) =  V.row(vertex_id);
-
-      }
-      edges.row(num_edges++) << points.row(0), points.row(1);
-      edges.row(num_edges++) << points.row(1), points.row(2);
-      edges.row(num_edges++) << points.row(2), points.row(0);
-    }
-    edges.conservativeResize(num_edges, Eigen::NoChange);
-    viewer.data.add_edges(edges.leftCols(3), edges.rightCols(3), Eigen::RowVector3d(0.9,0.9,0.9));
-
-  }
-#endif
   return false;
 }
 
 bool callback_key_down(igl::viewer::Viewer& viewer, unsigned char key, int modifiers)
 {
   bool handled = false;
+  if (key == 'H') {
+    Hfunction = computeH();
+    callback_key_down(viewer, '1', 0);
+    handled = true;
+  }
   if (key == 'S')
   {
     mouse_mode = SELECT;
+    callback_key_down(viewer, '1', 0);
     handled = true;
   }
 
-  if ((key == 'T') && (modifiers == IGL_MOD_ALT))
+  if (key == 'N')
   {
+    mouse_mode = NONE;
+    callback_key_down(viewer, '1', 0);
+    handled = true;
+  }
+
+  if (key == 'M') {
     mouse_mode = TRANSLATE;
-    handled = true;
-  }
-
-  if ((key == 'R') && (modifiers == IGL_MOD_ALT))
-  {
-    mouse_mode = ROTATE;
-    handled = true;
-  }
-  if (key == 'A')
-  {
-    applySelection();
     callback_key_down(viewer, '1', 0);
     handled = true;
   }
 
   viewer.ngui->refresh();
   return handled;
-}
-
-void onNewHandleID()
-{
-  //store handle vertices too
-  int numFree = (handle_id.array() == -1).cast<int>().sum();
-  int num_handle_vertices = V.rows() - numFree;
-  handle_vertices.setZero(num_handle_vertices);
-  handle_vertex_positions.setZero(num_handle_vertices,3);
-
-  int count = 0;
-  for (long vi = 0; vi<V.rows(); ++vi)
-    if(handle_id[vi] >=0)
-      handle_vertices[count++] = vi;
-
-  compute_handle_centroids();
-}
-
-void applySelection()
-{
-  int index = handle_id.maxCoeff()+1;
-  for (int i =0; i<selected_v.rows(); ++i)
-  {
-    const int selected_vertex = selected_v[i];
-    if (handle_id[selected_vertex] == -1)
-      handle_id[selected_vertex] = index;
-  }
-  selected_v.resize(0,1);
-
-  onNewHandleID();
-}
-
-void compute_handle_centroids()
-{
-  //compute centroids of handles
-  int num_handles = handle_id.maxCoeff()+1;
-  handle_centroids.setZero(num_handles,3);
-
-  Eigen::VectorXi num; num.setZero(num_handles,1);
-  for (long vi = 0; vi<V.rows(); ++vi)
-  {
-    int r = handle_id[vi];
-    if ( r!= -1)
-    {
-      handle_centroids.row(r) += V.row(vi);
-      num[r]++;
-    }
-  }
-
-  for (long i = 0; i<num_handles; ++i)
-    handle_centroids.row(i) = handle_centroids.row(i).array()/num[i];
-
-}
-
-//computes translation for the vertices of the moving handle based on the mouse motion
-Eigen::Vector3f computeTranslation (igl::viewer::Viewer& viewer,
-                                    int mouse_x,
-                                    int from_x,
-                                    int mouse_y,
-                                    int from_y,
-                                    Eigen::RowVector3d pt3D)
-{
-  Eigen::Matrix4f modelview = viewer.core.view * viewer.core.model;
-  //project the given point (typically the handle centroid) to get a screen space depth
-  Eigen::Vector3f proj = igl::project(pt3D.transpose().cast<float>().eval(),
-                                      modelview,
-                                      viewer.core.proj,
-                                      viewer.core.viewport);
-  float depth = proj[2];
-
-  double x, y;
-  Eigen::Vector3f pos1, pos0;
-
-  //unproject from- and to- points
-  x = mouse_x;
-  y = viewer.core.viewport(3) - mouse_y;
-  pos1 = igl::unproject(Eigen::Vector3f(x,y,depth),
-                        modelview,
-                        viewer.core.proj,
-                        viewer.core.viewport);
-
-
-  x = from_x;
-  y = viewer.core.viewport(3) - from_y;
-  pos0 = igl::unproject(Eigen::Vector3f(x,y,depth),
-                        modelview,
-                        viewer.core.proj,
-                        viewer.core.viewport);
-
-  //translation is the vector connecting the two
-  Eigen::Vector3f translation = pos1 - pos0;
-  return translation;
-
-}
-
-
-//computes translation for the vertices of the moving handle based on the mouse motion
-Eigen::Vector4f computeRotation(igl::viewer::Viewer& viewer,
-                                int mouse_x,
-                                int from_x,
-                                int mouse_y,
-                                int from_y,
-                                Eigen::RowVector3d pt3D)
-{
-
-  Eigen::Vector4f rotation;
-  rotation.setZero();
-  rotation[3] = 1.;
-
-  Eigen::Matrix4f modelview = viewer.core.view * viewer.core.model;
-
-  //initialize a trackball around the handle that is being rotated
-  //the trackball has (approximately) width w and height h
-  double w = viewer.core.viewport[2]/8;
-  double h = viewer.core.viewport[3]/8;
-
-  //the mouse motion has to be expressed with respect to its center of mass
-  //(i.e. it should approximately fall inside the region of the trackball)
-
-  //project the given point on the handle(centroid)
-  Eigen::Vector3f proj = igl::project(pt3D.transpose().cast<float>().eval(),
-                                      modelview,
-                                      viewer.core.proj,
-                                      viewer.core.viewport);
-  proj[1] = viewer.core.viewport[3] - proj[1];
-
-  //express the mouse points w.r.t the centroid
-  from_x -= proj[0]; mouse_x -= proj[0];
-  from_y -= proj[1]; mouse_y -= proj[1];
-
-  //shift so that the range is from 0-w and 0-h respectively (similarly to a standard viewport)
-  from_x += w/2; mouse_x += w/2;
-  from_y += h/2; mouse_y += h/2;
-
-  //get rotation from trackball
-  Eigen::Vector4f drot = viewer.core.trackball_angle.coeffs();
-  Eigen::Vector4f drot_conj;
-  igl::quat_conjugate(drot.data(), drot_conj.data());
-  igl::trackball(w, h, float(1.), rotation.data(), from_x, from_y, mouse_x, mouse_y, rotation.data());
-
-  //account for the modelview rotation: prerotate by modelview (place model back to the original
-  //unrotated frame), postrotate by inverse modelview
-  Eigen::Vector4f out;
-  igl::quat_mult(rotation.data(), drot.data(), out.data());
-  igl::quat_mult(drot_conj.data(), out.data(), rotation.data());
-  return rotation;
 }

@@ -21,10 +21,8 @@ private:
   std::vector<std::vector<unsigned int> > stroke2DPoints;
   double d = -1;
 public:
-  int strokeAdd(int mouse_x, int mouse_y);
+  Eigen::RowVector3d strokeAdd(int mouse_x, int mouse_y);
   void strokeFinish(Eigen::VectorXi &selected_vertices);
-  void strokeReset();
-  int pickVertex(int mouse_x, int mouse_y);
   //the stroke
   std::vector< Eigen::Matrix<double, 1,3>  > strokePoints;
 };
