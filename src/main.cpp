@@ -133,13 +133,11 @@ Eigen::MatrixXd computeH() {
   Eigen::MatrixXd CV(C.rows()+V.rows(), 2);
   CV << C, V;
   Eigen::MatrixXd H;
-  igl::triangle::triangulate(CV, E, H, "a100.0.05q", V2, F2);
+  igl::triangle::triangulate(CV, E, H, "a100.0.05qY", V2, F2);
   // compute bi-Laplacian coefficient.
-  Eigen::SparseMatrix<double> L, M, Minv;
+  Eigen::SparseMatrix<double> L;
   igl::cotmatrix(V2, F2, L);
-  igl::massmatrix(V2, F2, igl::MASSMATRIX_TYPE_VORONOI, M);
-  igl::invert_diag(M, Minv);
-  Eigen::SparseMatrix<double> A = L * Minv * L;
+  Eigen::SparseMatrix<double> A = -L;
 
   // extract Aff and Afc from A.
   Eigen::MatrixXi internalP(V2.rows() - C.rows(), 1);
